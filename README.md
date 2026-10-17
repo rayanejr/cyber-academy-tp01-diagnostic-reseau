@@ -1,92 +1,68 @@
-# Cyber Academy — TP 01 : Diagnostic réseau Linux sous VMware
+# TP 01 Cyber : Diagnostic réseau Linux sous VMware
 
-Pour ce premier TP, j’ai configuré une machine virtuelle Kali Linux avec deux interfaces réseau sous VMware Workstation. L’objectif était de vérifier son adressage IPv4, ses routes, sa résolution DNS et son accès à Internet, puis de comprendre les anomalies rencontrées pendant les tests.
 
-La connectivité fonctionne, mais une latence élevée reste à expliquer. Ce compte rendu présente l’état actuel du diagnostic.
 
-## Mon environnement
+## Objectifs
+Configurer et diagnostiquer les interfaces IPv4 d'une VM Kali sous VMware, distinguer NAT et Host-only, lire une table de routage et tester ICMP, DNS et HTTPS.
 
-- **Système hôte :** Windows 11
-- **Hyperviseur :** VMware Workstation
-- **Machine virtuelle :** Kali Linux
-- **eth0 :** NAT, sur VMnet8
-- **eth1 :** Host-only, sur VMnet1
+## Environnement
+- Hôte : Windows 11
+- Hyperviseur : VMware Workstation
+- Invité : Kali Linux
+- `eth0` : NAT (VMnet8), `192.168.152.152/24`
+- `eth1` : Host-only (VMnet1), `192.168.78.129/24`
+- Passerelle par défaut : `192.168.152.2` via `eth0`
+- Interface hôte VMnet1 : `192.168.78.1`
 
-## Configuration réseau obtenue
-
-| Interface | Mode | Adresse IPv4 | Réseau |
-| --- | --- | --- | --- |
-| eth0 | NAT (VMnet8) | 192.168.152.152/24 | 192.168.152.0/24 |
-| eth1 | Host-only (VMnet1) | 192.168.78.129/24 | 192.168.78.0/24 |
-
-La passerelle par défaut est **192.168.152.2**, accessible via **eth0**. Cette interface sert à accéder à Internet. L’interface **eth1** est dédiée au réseau Host-only, pour les échanges avec l’hôte et les machines présentes sur ce réseau virtuel.
-
-## Vérifications effectuées
-
-J’ai commencé par relever les adresses IP, les routes et l’état des connexions :
-
+## Commandes
 ```bash
 ip -br addr
 ip route
 nmcli device status
-nmcli connection show
-```
-
-J’ai ensuite testé la passerelle NAT, une adresse IP publique, la résolution de nom et une requête HTTPS :
-
-```bash
 ping -c 4 192.168.152.2
-ping -c 4 1.1.1.1
+ping -c 4 192.168.78.1
+ping -c 10 1.1.1.1
 getent ahostsv4 example.com
 curl -I --max-time 10 https://example.com
+ip route get 1.1.1.1
+ip route get 192.168.78.1
 ```
 
-Ces tests permettent de vérifier séparément la connectivité IP, la résolution DNS et l’accès à un service web en HTTPS.
+Sous Windows :
+```powershell
+Get-NetIPConfiguration
+ping -n 20 192.168.100.1
+netsh wlan show interfaces
+tracert -d 1.1.1.1
+```
 
-## Ce que j’ai observé
+## Résultats constatés
+| Test | Résultat |
+|---|---|
+| Kali → passerelle NAT `192.168.152.2` | 0 % de perte ; RTT moyen 0,243 ms |
+| Kali → hôte Host-only `192.168.78.1` | 4/4 reçus ; RTT moyen 0,783 ms |
+| Kali → `1.1.1.1` | 10/10 reçus ; RTT moyen 1 589 ms |
+| Windows → `1.1.1.1` | 10/10 reçus ; RTT moyen 1 618 ms |
+| Windows → passerelle Wi-Fi `192.168.100.1` | 20/20 reçus ; RTT moyen 1 547 ms ; min 804 ms, max 2 214 ms |
+| Résolution DNS | Réussie pour `example.com` |
+| HTTPS | Réponse `HTTP/2 200` pour `example.com` |
+| `eth1` initialement en Bridged | Pas d'adresse IPv4 active |
+| `eth1` après passage en Host-only | Adresse `192.168.78.129/24`, interface connectée |
 
-| Vérification | Résultat |
-| --- | --- |
-| Accès à la passerelle NAT | 0 % de perte, RTT moyen de 0,243 ms |
-| Connectivité IP publique | 0 % de perte lors des tests |
-| Résolution DNS de `example.com` | Fonctionnelle |
-| Requête HTTPS vers `example.com` | Réponse `HTTP/2 200` |
-| État final des interfaces | eth0 et eth1 connectées |
+## Analyse
+La table de routage contient deux routes directement connectées (`192.168.152.0/24` sur `eth0`, `192.168.78.0/24` sur `eth1`) et une route par défaut via `192.168.152.2` sur `eth0`. La communication Host-only fonctionne avec une faible latence.
 
-Au départ, **eth1 était configurée en Bridged et n’avait pas d’adresse IPv4 active**. Après son passage en **Host-only**, elle a obtenu l’adresse **192.168.78.129/24**. La configuration correspond alors à l’architecture prévue pour le TP.
+Les latences élevées sont visibles sur Windows et Kali, y compris de Windows vers sa passerelle Wi-Fi. Le problème ne peut donc pas être attribué exclusivement à VMware. Le Wi-Fi, le routeur et la congestion locale sont des pistes prioritaires, sans cause racine établie. Le diagnostic Wi-Fi indique 5 GHz, canal 36, signal 80 %, RSSI -57 dBm et débit de réception négocié de 13,5 Mbit/s lors de la mesure. Ce dernier chiffre n'est pas une mesure du débit Internet.
 
-## Le point encore à éclaircir : la latence
+Le test vers `192.168.1.1` n'était pas pertinent : la véritable passerelle Wi-Fi était `192.168.100.1`.
 
-Malgré des tests de connectivité réussis, les temps de réponse vers `1.1.1.1` sont élevés. Une comparaison sur **10 requêtes par système** a donné les moyennes suivantes :
+## Évaluation pédagogique
+- Configuration pratique et tests : réussis.
+- Premier QCM de rattrapage : 4/5.
+- Rattrapage ciblé sur le routage : 3/3.
+- **TP 01 validé** après correction de la confusion entre interface Host-only et passerelle par défaut.
 
-| Système | Latence moyenne vers 1.1.1.1 |
-| --- | --- |
-| Kali Linux | 1 589 ms |
-| Windows 11 | 1 618 ms |
+## Suite
+TP 02 : Ethernet, adresses MAC, ARP, commutation L2 et communication entre deux VM sur VMnet1.
 
-Ces mesures sur 10 requêtes sont distinctes des commandes de vérification sur 4 requêtes présentées plus haut.
-
-Le traceroute réalisé depuis Windows montre aussi une latence élevée dès le premier saut, vers la passerelle Wi-Fi **192.168.100.1**.
-
-Le fait de retrouver une latence similaire sur l’hôte et dans la VM invite à examiner également la connexion de Windows et le réseau local. Cela ne permet toutefois pas d’identifier la cause exacte, ni de conclure à un problème Wi-Fi à ce stade.
-
-## Prochaines vérifications
-
-- [ ] Effectuer un ping direct vers `192.168.100.1` depuis Windows.
-- [ ] Vérifier la qualité de la connexion Wi-Fi.
-- [ ] Tester la communication entre Kali et l’interface Host-only de Windows, à l’adresse `192.168.78.1`.
-
-## Ce que ce TP m’a permis de travailler
-
-- Lire un adressage IPv4 et un préfixe CIDR.
-- Vérifier une table de routage et identifier la passerelle par défaut.
-- Distinguer les modes NAT, Bridged et Host-only de VMware.
-- Examiner les interfaces et les connexions réseau sous Linux.
-- Croiser des tests ICMP, DNS et HTTPS pour établir un diagnostic.
-- Comparer les mesures de l’hôte et de la VM avant de tirer une conclusion.
-
-## Bilan provisoire
-
-L’adressage IPv4 et le routage de Kali sont cohérents avec l’architecture retenue. Les tests de connectivité, de résolution DNS et d’accès HTTPS ont réussi.
-
-Le TP reste néanmoins en cours de validation : je dois encore approfondir le diagnostic de latence avant de considérer les vérifications comme terminées.
+> Note : les adresses privées et les résultats correspondent à ce laboratoire. 
